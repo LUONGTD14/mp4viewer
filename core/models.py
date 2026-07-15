@@ -13,6 +13,8 @@ class Box:
         self.payload_size = size - header_size
         self.uuid = uuid
         self.fields: Dict[str, Any] = {}
+        self.editable_fields: Dict[str, Dict[str, Any]] = {}
+        self.custom_payload_bytes: Optional[bytes] = None
 
     def parse_payload(self, reader: BinaryReader) -> None:
         """Subclasses should override this method to parse their specific fields."""

@@ -180,3 +180,80 @@ def test_hevc_track():
     assert len(hvcc.fields["vps"]) == 1
     assert len(hvcc.fields["sps"]) == 1
     assert len(hvcc.fields["pps"]) == 1
+
+def test_modify_and_save():
+    import os
+    from core.writer import save_modified_file
+    
+    # 1. Parse original mock file
+    boxes = parse_file(MOCK_FILE)
+    moov = next(b for b in boxes if b.type_str == "moov")
+    mvhd = next(b for b in moov.children if b.type_str == "mvhd")
+    trak1 = next(b for b in moov.children if b.type_str == "trak")
+    tkhd1 = next(b for b in trak1.children if b.type_str == "tkhd")
+    
+    # 2. Modify values in-memory
+    mvhd.editable_fields["timescale"]["value"] = 90000
+    mvhd.editable_fields["duration"]["value"] = 450000
+    tkhd1.editable_fields["width"]["value"] = 1280.0
+    tkhd1.editable_fields["height"]["value"] = 720.0
+    
+    # 3. Save modified file to a temp file path
+    edited_file = "tests/mock_edited_temp.mp4"
+    if os.path.exists(edited_file):
+        os.remove(edited_file)
+        
+    try:
+        save_modified_file(edited_file, MOCK_FILE, boxes)
+        
+        # 4. Parse the edited file back
+        edited_boxes = parse_file(edited_file)
+        edited_moov = next(b for b in edited_boxes if b.type_str == "moov")
+        edited_mvhd = next(b for b in edited_moov.children if b.type_str == "mvhd")
+        edited_trak1 = next(b for b in edited_moov.children if b.type_str == "trak")
+        edited_tkhd1 = next(b for b in edited_trak1.children if b.type_str == "tkhd")
+        
+        # 5. Assert updated values
+        assert edited_mvhd.fields["timescale"] == 90000
+        assert edited_mvhd.fields["duration"] == 450000
+        assert edited_tkhd1.fields["width"] == 1280.0
+        assert edited_tkhd1.fields["height"] == 720.0
+        
+    finally:
+        # Clean up temp file
+        if os.path.exists(edited_file):
+            os.remove(edited_file)
+
+def test_hex_edit_payload():
+    import os
+    from core.writer import save_modified_file
+    
+    # 1. Parse original mock file
+    boxes = parse_file(MOCK_FILE)
+    free_box = next(b for b in boxes if b.type_str == "free")
+    
+    # 2. Modify raw bytes in-memory (must be exactly free_box.payload_size bytes!)
+    new_payload = b"MODIFIED FREE PAYLOAD DATA CHUNKS!"
+    new_payload = new_payload[:free_box.payload_size].ljust(free_box.payload_size, b" ")
+    free_box.custom_payload_bytes = new_payload
+    
+    # 3. Save modified file to a temp file path
+    edited_file = "tests/mock_edited_hex.mp4"
+    if os.path.exists(edited_file):
+        os.remove(edited_file)
+        
+    try:
+        save_modified_file(edited_file, MOCK_FILE, boxes)
+        
+        # 4. Read bytes directly from the file at payload_offset
+        with open(edited_file, "rb") as f:
+            f.seek(free_box.payload_offset)
+            written_bytes = f.read(free_box.payload_size)
+            
+        # 5. Assert updated values
+        assert written_bytes == new_payload
+        
+    finally:
+        # Clean up temp file
+        if os.path.exists(edited_file):
+            os.remove(edited_file)

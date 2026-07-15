@@ -46,6 +46,8 @@ class MP4ViewerApp:
         self.tree_item_to_box: Dict[str, Box] = {}
         self.box_to_tree_item: Dict[Box, str] = {}
         self.layout_segments: List[Tuple[int, int, str]] = [] # list of (x_start, x_end, tree_item_id)
+        self.hex_edit_mode = False
+        self.current_inspected_box: Optional[Box] = None
         
         # Initialize UI Components
         self.setup_styles()
@@ -123,6 +125,9 @@ class MP4ViewerApp:
         open_btn = ttk.Button(actions_frame, text="Mở tệp MP4/MOV", command=self.open_file)
         open_btn.pack(side=tk.RIGHT)
         
+        self.save_btn = ttk.Button(actions_frame, text="Lưu thành tệp mới", command=self.save_file, state=tk.DISABLED)
+        self.save_btn.pack(side=tk.RIGHT, padx=(0, 10))
+        
         # Divider
         divider = ttk.Separator(self.root, orient="horizontal")
         divider.pack(fill=tk.X, padx=12, pady=2)
@@ -193,8 +198,14 @@ class MP4ViewerApp:
         hex_frame = ttk.Frame(right_pane)
         right_pane.add(hex_frame, weight=1)
         
-        hex_lbl = ttk.Label(hex_frame, text="Hex Preview (Payload)", style="Heading.TLabel")
-        hex_lbl.pack(anchor=tk.W, pady=(6, 6))
+        hex_header_frame = ttk.Frame(hex_frame)
+        hex_header_frame.pack(fill=tk.X, pady=(6, 6))
+        
+        hex_lbl = ttk.Label(hex_header_frame, text="Hex Preview (Payload)", style="Heading.TLabel")
+        hex_lbl.pack(side=tk.LEFT)
+        
+        self.edit_hex_btn = ttk.Button(hex_header_frame, text="✏️ Sửa Hex Payload", command=self.toggle_hex_edit_mode, state=tk.DISABLED)
+        self.edit_hex_btn.pack(side=tk.RIGHT)
         
         hex_scroll = ttk.Scrollbar(hex_frame)
         hex_scroll.pack(side=tk.RIGHT, fill=tk.Y)
@@ -268,9 +279,13 @@ class MP4ViewerApp:
             # Reset inspectors
             self.clear_inspectors()
             
+            # Enable save button
+            self.save_btn.config(state=tk.NORMAL)
+            
         except Exception as e:
             self.status_lbl.config(text=f"Lỗi: {str(e)}", foreground=COLOR_RED)
             self.file_path_lbl.config(text="Phân tích thất bại")
+            self.save_btn.config(state=tk.DISABLED)
 
     def insert_box_to_tree(self, box: Box, parent_item: str, item_id: str):
         # Determine container or leaf text
@@ -331,6 +346,15 @@ class MP4ViewerApp:
         if not box:
             return
             
+        # Reset edit mode
+        self.hex_edit_mode = False
+        self.edit_hex_btn.config(text="✏️ Sửa Hex Payload")
+        if box.payload_size > 0:
+            self.edit_hex_btn.config(state=tk.NORMAL)
+        else:
+            self.edit_hex_btn.config(state=tk.DISABLED)
+            
+        self.current_inspected_box = box
         self.inspect_box(box)
         self.load_hex_preview(box)
 
@@ -373,38 +397,131 @@ class MP4ViewerApp:
             
             for k, v in box.fields.items():
                 friendly_k = k.replace("_", " ").title()
-                self.inspector_text.insert(tk.END, f"  {friendly_k}: ", "key")
                 
-                # Format value
-                if isinstance(v, int) and not isinstance(v, bool):
-                    v_str = f"{v:,} (0x{v:X})"
-                elif isinstance(v, list):
-                    # Format integers in lists to show hex representation
-                    formatted_list = []
-                    for item in v:
-                        if isinstance(item, int):
-                            formatted_list.append(f"{item:,} (0x{item:X})")
-                        else:
-                            formatted_list.append(item)
-                    v_str = str(formatted_list)
-                elif isinstance(v, dict):
-                    # Format integers in dictionaries to show hex representation
-                    formatted_dict = {}
-                    for dk, dv in v.items():
-                        if isinstance(dv, int) and not isinstance(dv, bool):
-                            formatted_dict[dk] = f"{dv:,} (0x{dv:X})"
-                        else:
-                            formatted_dict[dk] = dv
-                    import json
-                    v_str = json.dumps(formatted_dict, indent=4)
-                else:
-                    v_str = str(v)
+                # Check if this field is editable
+                if k in box.editable_fields:
+                    self.inspector_text.insert(tk.END, f"  ✏️ {friendly_k}: ", "key")
                     
-                self.inspector_text.insert(tk.END, f"{v_str}\n", "val")
+                    # Create Entry and Hex Label
+                    entry = ttk.Entry(self.inspector_text, width=15, font=("Space Mono", 10))
+                    entry.insert(0, str(box.editable_fields[k]["value"]))
+                    
+                    hex_lbl = ttk.Label(self.inspector_text, text="", font=("Space Mono", 9), background=BG_SECONDARY)
+                    
+                    # Bind edit event
+                    entry.bind("<KeyRelease>", lambda e, b=box, fn=k, ent=entry, lbl=hex_lbl: self.on_field_edited(b, fn, ent, lbl))
+                    entry.bind("<FocusOut>", lambda e, b=box, fn=k, ent=entry, lbl=hex_lbl: self.on_field_edited(b, fn, ent, lbl))
+                    
+                    # Embed widgets
+                    self.inspector_text.window_create(tk.END, window=entry)
+                    self.inspector_text.window_create(tk.END, window=hex_lbl)
+                    self.inspector_text.insert(tk.END, "\n")
+                    
+                    # Initial hex label update
+                    self.on_field_edited(box, k, entry, hex_lbl)
+                else:
+                    self.inspector_text.insert(tk.END, f"  {friendly_k}: ", "key")
+                    
+                    # Format value
+                    if isinstance(v, int) and not isinstance(v, bool):
+                        v_str = f"{v:,} (0x{v:X})"
+                    elif isinstance(v, list):
+                        formatted_list = []
+                        for item in v:
+                            if isinstance(item, int):
+                                formatted_list.append(f"{item:,} (0x{item:X})")
+                            else:
+                                formatted_list.append(item)
+                        v_str = str(formatted_list)
+                    elif isinstance(v, dict):
+                        formatted_dict = {}
+                        for dk, dv in v.items():
+                            if isinstance(dv, int) and not isinstance(dv, bool):
+                                formatted_dict[dk] = f"{dv:,} (0x{dv:X})"
+                            else:
+                                formatted_dict[dk] = dv
+                        import json
+                        v_str = json.dumps(formatted_dict, indent=4)
+                    else:
+                        v_str = str(v)
+                        
+                    self.inspector_text.insert(tk.END, f"{v_str}\n", "val")
         else:
             self.inspector_text.insert(tk.END, "Không chứa thông số fields được phân tích đặc thù. Sử dụng Hex View để xem dữ liệu nhị phân thô.", "error")
             
         self.inspector_text.config(state=tk.DISABLED)
+
+    def on_field_edited(self, box: Box, field_name: str, entry: ttk.Entry, hex_lbl: ttk.Label):
+        val_str = entry.get().strip()
+        field_info = box.editable_fields[field_name]
+        t = field_info["type"]
+        
+        try:
+            if not val_str:
+                return
+                
+            # Parse and validate the value based on field type
+            if t == "fixed16_16" or t == "fixed8_8":
+                val = float(val_str)
+            else:
+                val = int(val_str, 0) # support hex (0x...) or dec
+                
+            # Update in-memory value
+            field_info["value"] = val
+            
+            # Also update box.fields so it reflects in the parsed data
+            box.fields[field_name] = val
+            
+            # Update the live hex label next to the entry
+            if t == "fixed16_16":
+                raw_hex = int(val * 65536) & 0xFFFFFFFF
+                hex_lbl.config(text=f" (0x{raw_hex:08X})", foreground=COLOR_GREEN)
+            elif t == "fixed8_8":
+                raw_hex = int(val * 256) & 0xFFFF
+                hex_lbl.config(text=f" (0x{raw_hex:04X})", foreground=COLOR_GREEN)
+            elif t == "full_range_bit":
+                hex_lbl.config(text=" (0x80)" if val else " (0x00)", foreground=COLOR_GREEN)
+            else:
+                # uint16, uint32, uint64, int16, int32
+                mask = 0xFFFFFFFF
+                if t in ("uint16", "int16"): mask = 0xFFFF
+                elif t == "uint64": mask = 0xFFFFFFFFFFFFFFFF
+                raw_hex = int(val) & mask
+                hex_lbl.config(text=f" (0x{raw_hex:X})", foreground=COLOR_GREEN)
+                
+            # Redraw canvas layout if track_id or width/height changed in root moov box
+            if field_name in ("track_id", "width", "height") and box.type_str in ("mvhd", "tkhd"):
+                self.draw_layout_map(None)
+                
+        except Exception:
+            hex_lbl.config(text=" (Lỗi định dạng)", foreground=COLOR_RED)
+
+    def save_file(self):
+        if not self.current_filepath or not self.root_boxes:
+            return
+            
+        filetypes = (
+            ("Video Files", "*.mp4 *.mov *.m4a"),
+            ("All Files", "*.*")
+        )
+        save_path = filedialog.asksaveasfilename(
+            title="Lưu tệp tin mới với các chỉnh sửa",
+            filetypes=filetypes,
+            defaultextension=".mp4",
+            initialfile="edited_" + os.path.basename(self.current_filepath)
+        )
+        if not save_path:
+            return
+            
+        self.status_lbl.config(text="Đang áp dụng thay đổi và lưu tệp tin...", foreground=ACCENT_BLUE)
+        self.root.update_idletasks()
+        
+        try:
+            from core.writer import save_modified_file
+            save_modified_file(save_path, self.current_filepath, self.root_boxes)
+            self.status_lbl.config(text=f"Đã lưu tệp tin mới thành công tại: {os.path.basename(save_path)}", foreground=COLOR_GREEN)
+        except Exception as e:
+            self.status_lbl.config(text=f"Lỗi khi lưu tệp tin: {str(e)}", foreground=COLOR_RED)
 
     def load_hex_preview(self, box: Box):
         self.hex_text.config(state=tk.NORMAL)
@@ -418,9 +535,12 @@ class MP4ViewerApp:
         # Read payload slice
         read_size = min(box.payload_size, 256)
         try:
-            with open(self.current_filepath, "rb") as f:
-                f.seek(box.payload_offset)
-                data = f.read(read_size)
+            if hasattr(box, "custom_payload_bytes") and box.custom_payload_bytes is not None:
+                data = box.custom_payload_bytes[:read_size]
+            else:
+                with open(self.current_filepath, "rb") as f:
+                    f.seek(box.payload_offset)
+                    data = f.read(read_size)
                 
             self.hex_text.insert(tk.END, f"Hiển thị {read_size} byte đầu của payload (Tổng size: {box.payload_size:,} bytes):\n\n")
             
@@ -445,6 +565,58 @@ class MP4ViewerApp:
             self.hex_text.insert(tk.END, f"Lỗi đọc nhị phân: {str(e)}", "offset")
             
         self.hex_text.config(state=tk.DISABLED)
+
+    def toggle_hex_edit_mode(self):
+        box = self.current_inspected_box
+        if not box or box.payload_size <= 0:
+            return
+            
+        if not self.hex_edit_mode:
+            # Entering Edit Mode
+            self.hex_edit_mode = True
+            self.edit_hex_btn.config(text="💾 Lưu Hex Payload (Áp dụng)")
+            
+            self.hex_text.config(state=tk.NORMAL)
+            self.hex_text.delete("1.0", tk.END)
+            
+            # Get the payload bytes
+            if hasattr(box, "custom_payload_bytes") and box.custom_payload_bytes is not None:
+                payload_bytes = box.custom_payload_bytes
+            else:
+                try:
+                    with open(self.current_filepath, "rb") as f:
+                        f.seek(box.payload_offset)
+                        payload_bytes = f.read(box.payload_size)
+                except Exception:
+                    payload_bytes = b""
+                    
+            # Render as space-separated hex bytes
+            hex_spaced = " ".join(f"{b:02X}" for b in payload_bytes)
+            self.hex_text.insert(tk.END, hex_spaced)
+            
+        else:
+            # Saving the Hex bytes
+            raw_text = self.hex_text.get("1.0", tk.END).strip().replace("\n", " ").replace("\r", " ")
+            try:
+                # Remove spaces and get clean hex string
+                clean_hex = "".join(c for c in raw_text if c.isalnum())
+                new_bytes = bytes.fromhex(clean_hex)
+                
+                # Verify size match
+                if len(new_bytes) != box.payload_size:
+                    raise ValueError(f"Kích thước dữ liệu Hex sửa đổi ({len(new_bytes)} bytes) không khớp với kích thước payload gốc ({box.payload_size} bytes).")
+                    
+                # Save in-memory
+                box.custom_payload_bytes = new_bytes
+                
+                self.hex_edit_mode = False
+                self.edit_hex_btn.config(text="✏️ Sửa Hex Payload")
+                self.load_hex_preview(box) # reload formatted view
+                self.status_lbl.config(text=f"Đã cập nhật dữ liệu Hex của box '{box.type_str}' thành công!", foreground=COLOR_GREEN)
+                
+            except Exception as e:
+                import tkinter.messagebox as messagebox
+                messagebox.showerror("Lỗi sửa Hex", str(e))
 
     def draw_layout_map(self, event=None):
         self.canvas.delete("all")

@@ -266,13 +266,22 @@ class Avc1Box(Box):
         # Skip 16 bytes pre-defined/reserved
         reader.skip(16)
         
+        width_offset = reader.tell()
         width = reader.read_u16()
+        
+        height_offset = reader.tell()
         height = reader.read_u16()
+        
+        horizres_offset = reader.tell()
         horizresolution = reader.read_fixed_point_16_16()
+        
+        vertres_offset = reader.tell()
         vertresolution = reader.read_fixed_point_16_16()
         
         # Skip 4 bytes reserved
         reader.skip(4)
+        
+        frame_count_offset = reader.tell()
         frame_count = reader.read_u16()
         
         # Compressor name (32 bytes Pascal string)
@@ -281,6 +290,7 @@ class Avc1Box(Box):
         compressor = reader.read_string(comp_len)
         reader.skip(31 - comp_len) # Skip remainder of 32 bytes
         
+        depth_offset = reader.tell()
         depth = reader.read_u16()
         # Skip 2 bytes pre-defined (-1)
         reader.skip(2)
@@ -294,6 +304,51 @@ class Avc1Box(Box):
             "frame_count": frame_count,
             "compressorname": compressor,
             "depth": depth
+        })
+
+        self.editable_fields.update({
+            "width": {
+                "offset": width_offset,
+                "format": ">H",
+                "value": width,
+                "label": "Width",
+                "type": "uint16"
+            },
+            "height": {
+                "offset": height_offset,
+                "format": ">H",
+                "value": height,
+                "label": "Height",
+                "type": "uint16"
+            },
+            "horizresolution": {
+                "offset": horizres_offset,
+                "format": ">I",
+                "value": horizresolution,
+                "label": "Horizontal Resolution",
+                "type": "fixed16_16"
+            },
+            "vertresolution": {
+                "offset": vertres_offset,
+                "format": ">I",
+                "value": vertresolution,
+                "label": "Vertical Resolution",
+                "type": "fixed16_16"
+            },
+            "frame_count": {
+                "offset": frame_count_offset,
+                "format": ">H",
+                "value": frame_count,
+                "label": "Frame Count",
+                "type": "uint16"
+            },
+            "depth": {
+                "offset": depth_offset,
+                "format": ">H",
+                "value": depth,
+                "label": "Depth",
+                "type": "uint16"
+            }
         })
         
         # Parse nested boxes starting at offset 78 (avcC, colr, etc.)
@@ -368,9 +423,16 @@ class ColrBox(Box):
         self.fields["colour_type"] = colour_type
         
         if colour_type == "nclx" and self.payload_size >= 10:
+            primaries_offset = reader.tell()
             colour_primaries = reader.read_u16()
+            
+            transfer_offset = reader.tell()
             transfer_characteristics = reader.read_u16()
+            
+            matrix_offset = reader.tell()
             matrix_coefficients = reader.read_u16()
+            
+            full_range_offset = reader.tell()
             full_range_byte = reader.read_u8()
             full_range = bool((full_range_byte >> 7) & 1)
             
@@ -379,6 +441,37 @@ class ColrBox(Box):
                 "transfer_characteristics": transfer_characteristics,
                 "matrix_coefficients": matrix_coefficients,
                 "full_range_flag": full_range
+            })
+
+            self.editable_fields.update({
+                "colour_primaries": {
+                    "offset": primaries_offset,
+                    "format": ">H",
+                    "value": colour_primaries,
+                    "label": "Colour Primaries",
+                    "type": "uint16"
+                },
+                "transfer_characteristics": {
+                    "offset": transfer_offset,
+                    "format": ">H",
+                    "value": transfer_characteristics,
+                    "label": "Transfer Characteristics",
+                    "type": "uint16"
+                },
+                "matrix_coefficients": {
+                    "offset": matrix_offset,
+                    "format": ">H",
+                    "value": matrix_coefficients,
+                    "label": "Matrix Coefficients",
+                    "type": "uint16"
+                },
+                "full_range_flag": {
+                    "offset": full_range_offset,
+                    "format": ">B",
+                    "value": 1 if full_range else 0,
+                    "label": "Full Range Flag",
+                    "type": "full_range_bit"
+                }
             })
 
 @register_box("hvcC")
