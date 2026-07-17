@@ -90,7 +90,15 @@ def parse_box_stream(reader: BinaryReader, end_offset: int) -> List[Box]:
     return boxes
 
 def parse_file(file_path: str) -> List[Box]:
-    """Helper function to parse a local MP4/MOV file by path."""
+    """Helper function to parse a local MP4/MOV or MKV/WebM file by path."""
+    with open(file_path, "rb") as f:
+        # Check first 4 bytes for EBML Header signature
+        sig = f.read(4)
+        
+    if sig == b"\x1A\x45\xDF\xA3":
+        from core.ebml_parser import parse_ebml_file
+        return parse_ebml_file(file_path)
+        
     file_size = os.path.getsize(file_path)
     with open(file_path, "rb") as f:
         reader = BinaryReader(f)

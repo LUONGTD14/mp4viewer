@@ -245,10 +245,10 @@ class MP4ViewerApp:
 
     def open_file(self):
         filetypes = (
-            ("Video Files", "*.mp4 *.mov *.m4a"),
+            ("Video Files", "*.mp4 *.mov *.m4a *.mkv *.webm"),
             ("All Files", "*.*")
         )
-        filepath = filedialog.askopenfilename(title="Chọn tệp MP4 hoặc MOV", filetypes=filetypes)
+        filepath = filedialog.askopenfilename(title="Chọn tệp tin Media (MP4/MOV/MKV/WebM)", filetypes=filetypes)
         if not filepath:
             return
             
@@ -319,6 +319,16 @@ class MP4ViewerApp:
             if box.type_str == "mdat":
                 mdat_idx = i
                 
+        if self.root_boxes and hasattr(self.root_boxes[0], "element_id"):
+            doc_type = "EBML"
+            for el in self.root_boxes:
+                if el.name == "EBML":
+                    for child in el.children:
+                        if child.name == "DocType":
+                            doc_type = str(child.fields.get("DocType", "EBML")).upper()
+            self.status_lbl.config(text=f"Phân tích hoàn tất: Định dạng {doc_type}", foreground=COLOR_GREEN)
+            return
+
         if moov_idx != -1 and mdat_idx != -1:
             if moov_idx < mdat_idx:
                 status_text = "Phân tích hoàn tất: Web Optimized (Fast Start)"
@@ -505,13 +515,13 @@ class MP4ViewerApp:
             return
             
         filetypes = (
-            ("Video Files", "*.mp4 *.mov *.m4a"),
+            ("Video Files", "*.mp4 *.mov *.m4a *.mkv *.webm"),
             ("All Files", "*.*")
         )
         save_path = filedialog.asksaveasfilename(
             title="Lưu tệp tin mới với các chỉnh sửa",
             filetypes=filetypes,
-            defaultextension=".mp4",
+            defaultextension=os.path.splitext(self.current_filepath)[1],
             initialfile="edited_" + os.path.basename(self.current_filepath)
         )
         if not save_path:
