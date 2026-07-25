@@ -19,6 +19,74 @@ COLOR_RED = "#d20f39"       # Bright red for errors
 COLOR_GREEN = "#40a02b"     # Green for success
 COLOR_YELLOW = "#df8e1d"    # Yellow for alerts
 
+BOX_DESCRIPTIONS = {
+    # MP4 / ISOBMFF Boxes
+    "ftyp": "File Type Box",
+    "moov": "Movie Box",
+    "mvhd": "Movie Header Box",
+    "trak": "Track Box",
+    "tkhd": "Track Header Box",
+    "mdia": "Media Box",
+    "mdhd": "Media Header Box",
+    "hdlr": "Handler Reference Box",
+    "minf": "Media Information Box",
+    "vmhd": "Video Media Header Box",
+    "smhd": "Sound Media Header Box",
+    "hmhd": "Hint Media Header Box",
+    "nmhd": "Null Media Header Box",
+    "dinf": "Data Information Box",
+    "dref": "Data Reference Box",
+    "stbl": "Sample Table Box",
+    "stsd": "Sample Description Box",
+    "stts": "Decoding Time to Sample Box",
+    "ctts": "Composition Time to Sample Box",
+    "stss": "Sync Sample Box (Keyframes)",
+    "stsz": "Sample Size Box",
+    "stco": "Chunk Offset Box (32-bit)",
+    "co64": "Chunk Offset Box (64-bit)",
+    "stsc": "Sample to Chunk Box",
+    "mdat": "Media Data Box",
+    "free": "Free Space Box",
+    "skip": "Skip Box",
+    "udta": "User Data Box",
+    "meta": "Metadata Box",
+    "ilst": "iTunes Metadata Item List Box",
+    "elst": "Edit List Box",
+    "edts": "Edit Box",
+    "mvex": "Movie Extends Box",
+    "mehd": "Movie Extends Header Box",
+    "trex": "Track Extends Box",
+    "moof": "Movie Fragment Box",
+    "mfhd": "Movie Fragment Header Box",
+    "traf": "Track Fragment Box",
+    "tfhd": "Track Fragment Header Box",
+    "trun": "Track Fragment Run Box",
+    "sidx": "Segment Index Box",
+    "tfdt": "Track Fragment Base Media Decode Time Box",
+    "avcC": "AVC Decoder Configuration Box",
+    "hvcC": "HEVC Decoder Configuration Box",
+    "av1C": "AV1 Decoder Configuration Box",
+    "vpcC": "VP9 Decoder Configuration Box",
+    "colr": "Color Parameter Box",
+    "pasp": "Pixel Aspect Ratio Box",
+    "uuid": "User Extension Box",
+
+    # EBML / WebM / MKV Elements
+    "ebml": "EBML Header",
+    "segment": "Segment",
+    "info": "Segment Information",
+    "tracks": "Tracks",
+    "track_entry": "Track Entry",
+    "cluster": "Cluster",
+    "simple_block": "Simple Block",
+    "block_group": "Block Group",
+    "seek_head": "Seek Head",
+    "cues": "Cues",
+    "tags": "Tags",
+    "attachments": "Attachments",
+    "void": "Void / Padding",
+}
+
 class MP4ViewerApp:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -380,7 +448,13 @@ class MP4ViewerApp:
         file_pct = (box.size / self.current_filesize) * 100 if self.current_filesize > 0 else 0
         type_hex = box.type_bytes.hex().upper()
         
-        self.inspector_text.insert(tk.END, f"BOX: {box.type_str} [0x{type_hex}]\n", "header")
+        desc = BOX_DESCRIPTIONS.get(box.type_str, "")
+        header_text = f"BOX: {box.type_str} [0x{type_hex}]"
+        if desc:
+            header_text += f" - {desc}"
+        header_text += "\n"
+        
+        self.inspector_text.insert(tk.END, header_text, "header")
         self.inspector_text.insert(tk.END, "========================================\n\n")
         
         self.inspector_text.insert(tk.END, "Kích thước (Size): ", "key")
@@ -689,11 +763,50 @@ class MP4ViewerApp:
                 "tree_item": None
             })
             
+        if c_width < 10:
+            return
+
+        # Calculate raw widths using square root of segment size for non-linear scaling.
+        # This keeps massive boxes (like mdat) dominant, while preserving relative proportion 
+        # and visibility of smaller boxes (like ftyp and moov) so that moov is larger than ftyp.
+        min_w = 4.0
+        weights = [(seg["size"] ** 0.5) for seg in segments]
+        total_weight = sum(weights)
+        
+        if total_weight > 0:
+            raw_widths = [(w / total_weight) * c_width for w in weights]
+        else:
+            raw_widths = [c_width / len(segments) for _ in segments]
+        
+        adjusted_widths = list(raw_widths)
+        small_indices = []
+        large_indices = []
+        for i, w in enumerate(raw_widths):
+            if w < min_w:
+                small_indices.append(i)
+                adjusted_widths[i] = min_w
+            else:
+                large_indices.append(i)
+                
+        small_allocated = len(small_indices) * min_w
+        large_available = c_width - small_allocated
+        
+        if large_indices and large_available > 0:
+            large_raw_sum = sum(raw_widths[idx] for idx in large_indices)
+            if large_raw_sum > 0:
+                for idx in large_indices:
+                    adjusted_widths[idx] = (raw_widths[idx] / large_raw_sum) * large_available
+            else:
+                for idx in large_indices:
+                    adjusted_widths[idx] = large_available / len(large_indices)
+        elif large_available < 0:
+            scale = c_width / (len(segments) * min_w)
+            adjusted_widths = [min_w * scale for _ in segments]
+
         # Draw on Canvas
         x_cursor = 0
-        for seg in segments:
-            pct = seg["size"] / self.current_filesize
-            seg_w = max(pct * c_width, 2.0) # at least 2 pixels wide
+        for i, seg in enumerate(segments):
+            seg_w = adjusted_widths[i]
             
             x_start = x_cursor
             x_end = x_start + seg_w
