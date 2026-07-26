@@ -56,14 +56,15 @@ class MvhdBox(FullBox):
         pref_vol_offset = reader.tell()
         preferred_volume = reader.read_fixed_point_8_8()
         
-        # Skip reserved 10 bytes
-        reader.skip(10)
+        # Read reserved fields
+        reserved_1 = reader.read_u16()
+        reserved_2 = [reader.read_u32(), reader.read_u32()]
         
         # Read matrix (36 bytes)
         matrix = [reader.read_fixed_point_16_16() for _ in range(9)]
         
-        # Skip pre-defined 24 bytes
-        reader.skip(24)
+        # Read pre-defined fields
+        pre_defined = [reader.read_u32() for _ in range(6)]
         
         next_track_id_offset = reader.tell()
         next_track_id = reader.read_u32()
@@ -79,7 +80,10 @@ class MvhdBox(FullBox):
             "duration_seconds": round(duration_seconds, 3),
             "preferred_rate": preferred_rate,
             "preferred_volume": preferred_volume,
+            "reserved_1": reserved_1,
+            "reserved_2": reserved_2,
             "matrix": [round(m, 4) for m in matrix],
+            "pre_defined": pre_defined,
             "next_track_id": next_track_id
         })
 
@@ -130,7 +134,7 @@ class TkhdBox(FullBox):
             modification_time = reader.read_u64()
             track_id_offset = reader.tell()
             track_id = reader.read_u32()
-            reader.skip(4)  # reserved
+            reserved_1 = reader.read_u32()
             duration_offset = reader.tell()
             duration = reader.read_u64()
             duration_fmt = ">Q"
@@ -140,13 +144,13 @@ class TkhdBox(FullBox):
             modification_time = reader.read_u32()
             track_id_offset = reader.tell()
             track_id = reader.read_u32()
-            reader.skip(4)  # reserved
+            reserved_1 = reader.read_u32()
             duration_offset = reader.tell()
             duration = reader.read_u32()
             duration_fmt = ">I"
             duration_type = "uint32"
 
-        reader.skip(8)  # reserved
+        reserved_2 = [reader.read_u32(), reader.read_u32()]
         layer_offset = reader.tell()
         layer = reader.read_u16()
         
@@ -156,7 +160,7 @@ class TkhdBox(FullBox):
         volume_offset = reader.tell()
         volume = reader.read_fixed_point_8_8()
         
-        reader.skip(2)  # reserved
+        reserved_3 = reader.read_u16()
         
         # Read matrix (36 bytes)
         matrix = [reader.read_fixed_point_16_16() for _ in range(9)]
@@ -172,9 +176,12 @@ class TkhdBox(FullBox):
             "modification_time": parse_mp4_time(modification_time),
             "track_id": track_id,
             "duration": duration,
+            "reserved_1": reserved_1,
+            "reserved_2": reserved_2,
             "layer": layer,
             "alternate_group": alternate_group,
             "volume": volume,
+            "reserved_3": reserved_3,
             "matrix": [round(m, 4) for m in matrix],
             "width": width,
             "height": height
@@ -293,7 +300,7 @@ class HdlrBox(FullBox):
     def parse_payload(self, reader: BinaryReader) -> None:
         pre_defined = reader.read_u32()
         handler_type = reader.read_string(4)
-        reader.skip(12)
+        reserved = [reader.read_u32() for _ in range(3)]
         
         rem_len = self.payload_size - 20
         if rem_len > 0:
@@ -313,7 +320,9 @@ class HdlrBox(FullBox):
             name = ""
             
         self.fields.update({
+            "pre_defined": pre_defined,
             "handler_type": handler_type,
+            "reserved": reserved,
             "handler_name": name
         })
 
@@ -348,10 +357,11 @@ class SmhdBox(FullBox):
     def parse_payload(self, reader: BinaryReader) -> None:
         balance_offset = reader.tell()
         balance = reader.read_fixed_point_8_8()
-        reader.skip(2)
+        reserved = reader.read_u16()
         
         self.fields.update({
-            "balance": balance
+            "balance": balance,
+            "reserved": reserved
         })
 
         self.editable_fields.update({
